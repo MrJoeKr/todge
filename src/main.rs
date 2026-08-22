@@ -6,11 +6,15 @@ fn main() {
     println!("todge.");
 
     let mut position: usize = 5;
-    let mut state = String::from("...........");
-    // state[position] = "@";
-    state.replace_range(position..position+1, "@");
+    const SIZE: usize = 11;
+    let mut state = ['.'; SIZE];
+
+    state[position] = '@';
     loop { 
-        println!("{}", state);
+        for s in &state {
+            print!("{s}");
+        }
+        println!();
         println!("Move [l/r] or quit [q]:");
 
         let mut decision_in = String::new();
@@ -20,8 +24,7 @@ fn main() {
 
         let decision: &str = decision_in.trim();
 
-        // state[position] = ".";
-        state.replace_range(position..position+1, ".");
+        state[position] = '.';
 
         println!("Got: {decision} with len: {}", decision.len());
 
@@ -38,7 +41,6 @@ fn main() {
             break;
         }
 
-        // state[position] = "@";
-        state.replace_range(position..position+1, "@");
+        state[position] = '@';
     }
 }
