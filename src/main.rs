@@ -1,20 +1,29 @@
 use std::io;
 
+
+struct Obstacle {
+    x: usize,
+    y: usize,
+}
+
 fn main() {
     // Stage 1: moving from left to right with player.
     // after every input, print new position.
     println!("todge.");
 
-    let mut position: usize = 5;
-    const SIZE: usize = 11;
-    let mut state = ['.'; SIZE];
+    let mut px: usize = 5;
+    const WIDTH: usize = 11;
+    const HEIGHT: usize = 11;
+    let mut state = [['.'; WIDTH]; HEIGHT];
 
-    state[position] = '@';
+    state[HEIGHT-1][px] = '@';
     loop { 
-        for s in &state {
-            print!("{s}");
+        for line in &state {
+            for s in line {
+                print!("{s}");
+            }
+            println!();
         }
-        println!();
         println!("Move [l/r] or quit [q]:");
 
         let mut decision_in = String::new();
@@ -24,23 +33,22 @@ fn main() {
 
         let decision: &str = decision_in.trim();
 
-        state[position] = '.';
+        state[HEIGHT-1][px] = '.';
 
         println!("Got: {decision} with len: {}", decision.len());
 
         if decision == "l" {
-            if position == 0 {
-                position = state.len() - 1;
-            } else {
-                position -= 1;
-            }
+            px = if px != 0 {
+                px - 1
+            } else { 
+                state.len() - 1
+            };
         } else if decision == "r" {
-            position += 1; 
-            position %= state.len();
+            px = (px + 1) % state.len(); 
         } else if decision == "q" {
             break;
         }
 
-        state[position] = '@';
+        state[HEIGHT-1][px] = '@';
     }
 }
