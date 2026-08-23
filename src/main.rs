@@ -1,4 +1,4 @@
-use std::{io, time::Duration, collections::HashMap};
+use std::{cmp, collections::HashMap, io, time::Duration};
 use rand::distr::{self, Distribution};
 
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
@@ -23,7 +23,10 @@ const PLAYER_ICON: char = '@';
 const OBS_ICON: char = '■';
 
 // Obstacle spawning
-const SPAWN_AFTER_TICKS: u64 = 10;
+const SPAWN_AFTER_TICKS: u64 = 4;
+const INIT_SPEEDUP_AFTER_TICKS: u64 = 100;
+const SLOW_SPEEDUP: u64 = 1000;
+const INIT_MOVE_AFTER_TICKS: u32 = 11;
 
 #[derive(Debug)]
 pub struct App {
@@ -34,8 +37,11 @@ pub struct App {
     // Player
     px: usize,
 
+    // Obstacles
     obstacles: HashMap<u64, Obstacle>, // { id: Obs }
     obs_id: u64,
+    obs_speed: u32,
+    speedup_after_ticks: u64,
 
     elapsed_ticks: u64,
 
@@ -52,8 +58,10 @@ impl App {
 
             px: WIDTH / 2,
 
-            obs_id: 0,
             obstacles: HashMap::new(),
+            obs_id: 0,
+            obs_speed: 0,
+            speedup_after_ticks: INIT_SPEEDUP_AFTER_TICKS,
 
             elapsed_ticks: 0,
 
@@ -102,10 +110,15 @@ impl App {
                 Obstacle { 
                     x,
                     y: 0,
-                    move_after_ticks: 10,
+                    move_after_ticks: INIT_MOVE_AFTER_TICKS - self.obs_speed,
                     next_move: 0
                 }
             );
+        }
+
+        if self.elapsed_ticks.is_multiple_of(self.speedup_after_ticks) {
+            self.obs_speed = cmp::min(self.obs_speed + 1, INIT_MOVE_AFTER_TICKS - 1);
+            self.speedup_after_ticks += SLOW_SPEEDUP;
         }
     }
 
