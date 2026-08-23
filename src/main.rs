@@ -23,10 +23,11 @@ const PLAYER_ICON: char = '@';
 const OBS_ICON: char = '■';
 
 // Obstacle spawning
-const SPAWN_AFTER_TICKS: u64 = 4;
+const SPAWN_AFTER_TICKS: u64 = 6;
 const INIT_SPEEDUP_AFTER_TICKS: u64 = 100;
-const SLOW_SPEEDUP: u64 = 1000;
+const SLOW_SPEEDUP: u64 = 100;
 const INIT_MOVE_AFTER_TICKS: u32 = 11;
+const OBS_MAX_SPEED: u32 = INIT_MOVE_AFTER_TICKS - 2;
 
 #[derive(Debug)]
 pub struct App {
@@ -117,7 +118,7 @@ impl App {
         }
 
         if self.elapsed_ticks.is_multiple_of(self.speedup_after_ticks) {
-            self.obs_speed = cmp::min(self.obs_speed + 1, INIT_MOVE_AFTER_TICKS - 1);
+            self.obs_speed = cmp::min(self.obs_speed + 1, OBS_MAX_SPEED);
             self.speedup_after_ticks += SLOW_SPEEDUP;
         }
     }
