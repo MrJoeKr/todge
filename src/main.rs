@@ -8,12 +8,12 @@ use ratatui::{
     layout::Rect,
     style::Stylize,
     symbols::border,
-    text::{Line, Text},
+    text::{Line, Text, Span},
     widgets::{Block, Paragraph, Widget},
     DefaultTerminal, Frame,
 };
 
-const WIDTH: usize = 25;
+const WIDTH: usize = 50;
 const HEIGHT: usize = 20; 
 
 const TICK_RATE: Duration = Duration::from_millis(10);
@@ -195,20 +195,37 @@ impl Widget for &App {
         let game_over_text = Text::from(vec![
             Line::from("Game Over!"),
             Line::from(vec![
-                "Final Score:".into(),
+                "Final Score: ".into(),
                 self.get_final_score().to_string().yellow(),
             ])
         ]);
 
-        let game_text = Text::from(self.state
-            .into_iter()
-            .map(|row| row.into_iter().collect::<String>())
-            .collect::<Vec<String>>()
-            .join("\n")
-            + "\n\nScore: "
-            + &format!("{:>5}", self.get_final_score().to_string().red())
-        );
+        // 2D array -> vector of lines
+        let mut lines: Vec<Line> = self.state
+            .iter()
+            .map(|row| {
+                Line::from(
+                    row.iter()
+                        .map(|&c| {
+                            match c {
+                                OBS_ICON => Span::from(c.to_string()).red(),
+                                PLAYER_ICON => Span::from(c.to_string()).green(),
+                                BG_ICON => Span::from(c.to_string()).blue(),
+                                _ => Span::from(c.to_string()),
+                            }
+                        })
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .collect();
 
+        lines.push(Line::from(""));
+        lines.push(Line::from(vec![
+                "Score: ".into(),
+                format!("{:>5}", self.get_final_score()).yellow()
+        ]));
+
+        let game_text = Text::from(lines);
         let out_text = if !self.game_over { game_text } else { game_over_text };
 
         Paragraph::new(out_text)
@@ -217,6 +234,9 @@ impl Widget for &App {
             .render(area, buf);
     }
 }
+
+// fn color_game_chars() {
+// }
 
 #[derive(Debug, Default)]
 struct Obstacle {
