@@ -279,9 +279,6 @@ impl Widget for &App {
     }
 }
 
-// fn color_game_chars() {
-// }
-
 #[derive(Debug, Default)]
 struct Obstacle {
     x: usize,
