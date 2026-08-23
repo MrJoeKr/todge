@@ -1,4 +1,4 @@
-use std::{cmp, collections::HashMap, io, time::Duration};
+use std::{collections::HashMap, io, time::{Duration, Instant}};
 use rand::distr::{self, Distribution};
 
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
@@ -16,18 +16,20 @@ use ratatui::{
 const WIDTH: usize = 50;
 const HEIGHT: usize = 20; 
 
-const TICK_RATE: Duration = Duration::from_millis(10);
+const TICKS_MS: u64 = 15;
+const TICK_RATE: Duration = Duration::from_millis(TICKS_MS); // ~66.67 FPS
 
 const BG_ICON: char = '.';
 const PLAYER_ICON: char = '@';
 const OBS_ICON: char = '■';
 
 // Obstacle spawning
-const SPAWN_AFTER_TICKS: u64 = 6;
-const INIT_SPEEDUP_AFTER_TICKS: u64 = 100;
-const SLOW_SPEEDUP: u64 = 100;
-const INIT_MOVE_AFTER_TICKS: u32 = 11;
-const OBS_MAX_SPEED: u32 = INIT_MOVE_AFTER_TICKS - 2;
+const SPAWN_AFTER_MS: Duration = Duration::from_millis(60);
+const INIT_MOVE_AFTER: Duration = Duration::from_millis(110);
+const INCREASE_SPEED_BY: Duration = Duration::from_millis(10);
+const INIT_SPEEDUP_AFTER: Duration = Duration::from_millis(1000);
+const SLOW_SPEEDUP: Duration = Duration::from_millis(100);
+const MIN_MOVE_AFTER: Duration = Duration::from_millis(TICKS_MS + 2);
 
 #[derive(Debug)]
 pub struct App {
@@ -41,10 +43,12 @@ pub struct App {
     // Obstacles
     obstacles: HashMap<u64, Obstacle>, // { id: Obs }
     obs_id: u64,
-    obs_speed: u32,
-    speedup_after_ticks: u64,
+    obs_move_after: Duration,
+    speedup_after: Duration,
+    time_after_spawn: Duration,
+    time_after_speedup: Duration,
 
-    elapsed_ticks: u64,
+    elapsed_time: Duration,
 
     rng: rand::prelude::ThreadRng,
     distr: distr::Uniform<usize>,
@@ -61,10 +65,12 @@ impl App {
 
             obstacles: HashMap::new(),
             obs_id: 0,
-            obs_speed: 0,
-            speedup_after_ticks: INIT_SPEEDUP_AFTER_TICKS,
+            obs_move_after: INIT_MOVE_AFTER,
+            speedup_after: INIT_SPEEDUP_AFTER,
+            time_after_spawn: Duration::ZERO,
+            time_after_speedup: Duration::ZERO,
 
-            elapsed_ticks: 0,
+            elapsed_time: Duration::ZERO,
 
             rng: rand::rng(),
             distr: distr::Uniform::new(0, WIDTH).unwrap(),
@@ -74,22 +80,25 @@ impl App {
     /// runs the application's main loop until the user quits
     pub fn run(&mut self, terminal: &mut DefaultTerminal) -> io::Result<()> {
         self.init_game();
+        let mut last_update = Instant::now();
 
         while !self.exit {
             // Poll for input (non‑blocking)
             if event::poll(Duration::ZERO)?
                     && let Event::Key(key_event) = event::read()?
-                    && key_event.kind == KeyEventKind::Press {
+                    && (key_event.kind == KeyEventKind::Press 
+                        || key_event.kind == KeyEventKind::Repeat) {
                 self.handle_key_event(key_event);
             }
 
-            if !self.game_over {
-                self.update_game();
+            if !self.game_over && last_update.elapsed() >= TICK_RATE {
+                self.update_game(last_update.elapsed());
+                last_update = Instant::now();
             }
 
             terminal.draw(|frame| self.draw(frame))?;
 
-            std::thread::sleep(TICK_RATE);
+            std::thread::sleep(Duration::from_millis(1));
         }
 
         Ok(())
@@ -104,37 +113,46 @@ impl App {
         self.obs_id += 1;
     }
 
-    fn try_spawn_obstacle(&mut self) {
-        if self.elapsed_ticks.is_multiple_of(SPAWN_AFTER_TICKS) {
+    fn try_spawn_obstacle(&mut self, dt: Duration) {
+        self.time_after_spawn += dt;
+        self.time_after_speedup += dt;
+        if self.time_after_spawn >= SPAWN_AFTER_MS {
+            self.time_after_spawn = Duration::ZERO;
             let x = self.distr.sample(&mut self.rng);
             self.add_obstacle(
                 Obstacle { 
                     x,
                     y: 0,
-                    move_after_ticks: INIT_MOVE_AFTER_TICKS - self.obs_speed,
-                    next_move: 0
+                    move_after: self.obs_move_after,
+                    time_since_move: Duration::ZERO,
                 }
             );
         }
 
-        if self.elapsed_ticks.is_multiple_of(self.speedup_after_ticks) {
-            self.obs_speed = cmp::min(self.obs_speed + 1, OBS_MAX_SPEED);
-            self.speedup_after_ticks += SLOW_SPEEDUP;
+        if self.time_after_speedup >= self.speedup_after {
+            self.time_after_speedup = Duration::ZERO;
+
+            if let Some(value) = self.obs_move_after.checked_sub(INCREASE_SPEED_BY) 
+                    && value >= MIN_MOVE_AFTER {
+                self.obs_move_after = value;
+            }
+            
+            self.speedup_after += SLOW_SPEEDUP;
         }
     }
 
-    fn update_obstacles(&mut self) {
-        for obs in self.obstacles.values_mut() {
-            self.state[obs.y][obs.x] = BG_ICON;
-            obs.update();
-
-            if obs.y < HEIGHT {
+    fn update_obstacles(&mut self, dt: Duration) {
+        // Clean dropped rocks, move falling ones
+        self.obstacles.retain(|_, obs| {
+            if obs.try_move(dt) {
+                self.state[obs.y - 1][obs.x] = BG_ICON;
+            }
+            let in_bounds = obs.y < HEIGHT;
+            if in_bounds {
                 self.state[obs.y][obs.x] = OBS_ICON;
             }
-        }
-
-        // Clean dropped rocks
-        self.obstacles.retain(|_, obs| obs.y < HEIGHT);
+            in_bounds
+        });
     }
 
     fn check_collision(&self) -> bool {
@@ -146,15 +164,15 @@ impl App {
         false
     }
 
-    fn update_game(&mut self) {
-        self.update_obstacles();
-        self.try_spawn_obstacle();
+    fn update_game(&mut self, dt: Duration) {
+        self.update_obstacles(dt);
+        self.try_spawn_obstacle(dt);
 
         if self.check_collision() {
             self.game_over = true;
         }
 
-        self.elapsed_ticks += 1;
+        self.elapsed_time += dt;
     }
 
     fn draw(&self, frame: &mut Frame) {
@@ -174,7 +192,7 @@ impl App {
         }
     }
 
-    fn get_final_score(&self) -> u64 { self.elapsed_ticks }
+    fn get_final_score(&self) -> u128 { self.elapsed_time.as_millis() / 10 }
 
     fn go_left(&mut self) {
         // TODO: Refactor left and right
@@ -239,11 +257,17 @@ impl Widget for &App {
             })
             .collect();
 
-        lines.push(Line::from(""));
-        lines.push(Line::from(vec![
+        lines.extend(vec![
+            Line::from(""),
+            Line::from(vec![
                 "Score: ".into(),
                 format!("{:>5}", self.get_final_score()).yellow()
-        ]));
+            ]),
+            Line::from(vec![
+                "Speed: ".into(),
+                format!("{:>5}", self.obs_move_after.as_millis()).blue()
+            ]),
+        ]);
 
         let game_text = Text::from(lines);
         let out_text = if !self.game_over { game_text } else { game_over_text };
@@ -262,19 +286,19 @@ impl Widget for &App {
 struct Obstacle {
     x: usize,
     y: usize,
-    move_after_ticks: u32,
-    next_move: u32,
+    move_after: Duration,
+    time_since_move: Duration,
 }
 
 impl Obstacle {
-    fn update(&mut self) {
-        if self.next_move > 0 {
-            self.next_move -= 1;
-            return;
+    fn try_move(&mut self, dt: Duration) -> bool {
+        self.time_since_move += dt;
+        if self.time_since_move >= self.move_after {
+            self.time_since_move = Duration::ZERO;
+            self.y += 1;
+            return true;
         }
-
-        self.next_move = self.move_after_ticks;
-        self.y += 1;
+        false
     }
 }
 
