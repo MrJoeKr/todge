@@ -1,22 +1,30 @@
-use std::{fs::File, collections::HashMap, io, time::{Duration, Instant}};
-use rand::{distr::{self, Distribution}, seq::IndexedRandom};
+use rand::{
+    distr::{self, Distribution},
+    seq::IndexedRandom,
+};
+use std::{
+    collections::HashMap,
+    fs::File,
+    io,
+    time::{Duration, Instant},
+};
 
-use tracing_subscriber::{fmt, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt};
 
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 
 use ratatui::{
+    DefaultTerminal, Frame,
     buffer::Buffer,
     layout::Rect,
     style::Stylize,
     symbols::border,
-    text::{Line, Text, Span},
+    text::{Line, Span, Text},
     widgets::{Block, Paragraph, Widget},
-    DefaultTerminal, Frame,
 };
 
 const WIDTH: usize = 50;
-const HEIGHT: usize = 20; 
+const HEIGHT: usize = 20;
 
 type GameGrid = [[char; WIDTH]; HEIGHT];
 
@@ -44,9 +52,27 @@ const MIN_MOVE_AFTER: Duration = Duration::from_millis(TICKS_MS + 2);
 const SPAWN_SHAPES: &[(Shape, u32)] = &[
     (Shape::Unit, 45),
     (Shape::Triangle, 10),
-    (Shape::Brick { width: 5, height: 2 }, 25),
-    (Shape::Brick { width: 2, height: 6 }, 10),
-    (Shape::Brick { width: 10, height: 3 }, 10),
+    (
+        Shape::Brick {
+            width: 5,
+            height: 2,
+        },
+        25,
+    ),
+    (
+        Shape::Brick {
+            width: 2,
+            height: 6,
+        },
+        10,
+    ),
+    (
+        Shape::Brick {
+            width: 10,
+            height: 3,
+        },
+        10,
+    ),
 ];
 
 #[derive(Debug)]
@@ -112,9 +138,9 @@ impl App {
         while !self.exit {
             // Poll for input (non‑blocking)
             if event::poll(Duration::ZERO)?
-                    && let Event::Key(key_event) = event::read()?
-                    && (key_event.kind == KeyEventKind::Press 
-                        || key_event.kind == KeyEventKind::Repeat) {
+                && let Event::Key(key_event) = event::read()?
+                && (key_event.kind == KeyEventKind::Press || key_event.kind == KeyEventKind::Repeat)
+            {
                 self.handle_key_event(key_event);
             }
 
@@ -155,22 +181,23 @@ impl App {
         if self.time_after_spawn >= SPAWN_AFTER_MS {
             self.time_after_spawn -= SPAWN_AFTER_MS;
             let x = self.distr.sample(&mut self.rng);
-            let chosen_shape =
-                SPAWN_SHAPES.choose_weighted(&mut self.rng, |item| item.1).unwrap().0;
+            let chosen_shape = SPAWN_SHAPES
+                .choose_weighted(&mut self.rng, |item| item.1)
+                .unwrap()
+                .0;
 
-            self.add_obstacle({
-                Obstacle::new(x, 0, self.obs_move_after, chosen_shape)
-            });
+            self.add_obstacle(Obstacle::new(x, 0, self.obs_move_after, chosen_shape));
         }
 
         if self.time_after_speedup >= self.speedup_after {
             self.time_after_speedup -= self.speedup_after;
 
-            if let Some(value) = self.obs_move_after.checked_sub(INCREASE_SPEED_BY) 
-                    && value >= MIN_MOVE_AFTER {
+            if let Some(value) = self.obs_move_after.checked_sub(INCREASE_SPEED_BY)
+                && value >= MIN_MOVE_AFTER
+            {
                 self.obs_move_after = value;
             }
-            
+
             self.speedup_after += SLOW_SPEEDUP;
         }
     }
@@ -180,32 +207,29 @@ impl App {
         self.obstacles.retain(|_, obs| {
             obs.move_obstacle(dt);
             // Check out of bounds
-            obs.cells.iter().any(|&(_x, y)| {
-                y < HEIGHT
-            })
+            obs.cells.iter().any(|&(_x, y)| y < HEIGHT)
         });
     }
 
     fn move_player(&mut self) {
         match self.player.move_state {
-            PlayerState::Moving(ref p_dir)
-                => match p_dir {
-                    PlayerDirection::Left => self.go_left(),
-                    PlayerDirection::Right => self.go_right(),
-                },
-            PlayerState::Dashing(ref p_dir)
-                => match p_dir {
-                    PlayerDirection::Left => self.dash_left(),
-                    PlayerDirection::Right => self.dash_right(),
-                },
+            PlayerState::Moving(ref p_dir) => match p_dir {
+                PlayerDirection::Left => self.go_left(),
+                PlayerDirection::Right => self.go_right(),
+            },
+            PlayerState::Dashing(ref p_dir) => match p_dir {
+                PlayerDirection::Left => self.dash_left(),
+                PlayerDirection::Right => self.dash_right(),
+            },
             PlayerState::Idle => (),
         }
     }
 
     fn check_collision(&self) -> bool {
         match self.player.move_state {
-            PlayerState::Moving(_) | PlayerState::Idle
-                => self.check_collision_helper(&[(self.player.x, self.player.y)]),
+            PlayerState::Moving(_) | PlayerState::Idle => {
+                self.check_collision_helper(&[(self.player.x, self.player.y)])
+            }
             PlayerState::Dashing(ref p_dir) => {
                 // `move_player()` already moved the player to the dash destination.
                 // Use the opposite direction to check collision.
@@ -213,7 +237,7 @@ impl App {
                 let direction = p_dir.opposite();
                 let dash_cells = self.construct_dash_cells(&direction);
                 self.check_collision_helper(&dash_cells)
-            },
+            }
         }
     }
 
@@ -228,13 +252,13 @@ impl App {
                     px = (px + WIDTH - 1) % WIDTH;
                     out.push((px, py));
                 }
-            },
+            }
             PlayerDirection::Right => {
                 for _ in 0..DASH_LENGTH {
                     px = (px + 1) % WIDTH;
                     out.push((px, py));
                 }
-            },
+            }
         }
 
         out
@@ -242,22 +266,24 @@ impl App {
 
     fn check_collision_helper(&self, targets: &[(usize, usize)]) -> bool {
         targets.iter().any(|target| {
-            self.obstacles.values().any(|obs| { obs.cells.contains(target) })
+            self.obstacles
+                .values()
+                .any(|obs| obs.cells.contains(target))
         })
     }
 
     fn drop_colliding_dashes_helper(&mut self, targets: &[(usize, usize)]) {
         // self.dash_collection.container.keys().any(|pos| { targets.contains(pos) })
-        self.dash_collection.container.retain(|pos, _de| {
-            !targets.contains(pos)
-        });
+        self.dash_collection
+            .container
+            .retain(|pos, _de| !targets.contains(pos));
     }
 
     fn drop_colliding_dashes(&mut self) {
         // Player + obstacles
         let mut targets = vec![self.player.position()];
 
-        let obstacles = self.obstacles.values().flat_map(|obs| { &obs.cells });
+        let obstacles = self.obstacles.values().flat_map(|obs| &obs.cells);
         targets.extend(obstacles);
 
         self.drop_colliding_dashes_helper(&targets);
@@ -290,21 +316,30 @@ impl App {
     fn handle_key_event(&mut self, key_event: KeyEvent) {
         match key_event.code {
             KeyCode::Char('q') => self.exit(),
-            KeyCode::Char('r') => if self.game_over { self.wants_restart = true; },
-            KeyCode::Char('h')
-                => self.player.move_state = PlayerState::Moving(PlayerDirection::Left),
-            KeyCode::Char('l')
-                => self.player.move_state = PlayerState::Moving(PlayerDirection::Right),
-            KeyCode::Char('H')
-                => self.player.move_state = PlayerState::Dashing(PlayerDirection::Left),
-            KeyCode::Char('L')
-                => self.player.move_state = PlayerState::Dashing(PlayerDirection::Right),
+            KeyCode::Char('r') => {
+                if self.game_over {
+                    self.wants_restart = true;
+                }
+            }
+            KeyCode::Char('h') => {
+                self.player.move_state = PlayerState::Moving(PlayerDirection::Left)
+            }
+            KeyCode::Char('l') => {
+                self.player.move_state = PlayerState::Moving(PlayerDirection::Right)
+            }
+            KeyCode::Char('H') => {
+                self.player.move_state = PlayerState::Dashing(PlayerDirection::Left)
+            }
+            KeyCode::Char('L') => {
+                self.player.move_state = PlayerState::Dashing(PlayerDirection::Right)
+            }
             _ => (),
         }
     }
 
-    fn get_final_score(&self) -> u128 { self.elapsed_time.as_millis() / 10 }
-
+    fn get_final_score(&self) -> u128 {
+        self.elapsed_time.as_millis() / 10
+    }
 
     fn go_left(&mut self) {
         self.player.x = (self.player.x + WIDTH - 1) % WIDTH;
@@ -331,7 +366,9 @@ impl App {
     }
 
     fn clear_board(&mut self) {
-        for row in &mut self.game_grid { row.fill(BG_ICON); }
+        for row in &mut self.game_grid {
+            row.fill(BG_ICON);
+        }
     }
 
     fn update_grid(&mut self) {
@@ -370,18 +407,17 @@ impl Widget for &App {
             .border_set(border::THICK);
 
         // 2D array -> vector of lines
-        let mut lines: Vec<Line> = self.game_grid
+        let mut lines: Vec<Line> = self
+            .game_grid
             .iter()
             .map(|row| {
                 Line::from(
                     row.iter()
-                        .map(|&c| {
-                            match c {
-                                OBS_ICON => Span::from(c.to_string()).red(),
-                                PLAYER_ICON => Span::from(c.to_string()).green(),
-                                BG_ICON => Span::from(c.to_string()).blue(),
-                                _ => Span::from(c.to_string()),
-                            }
+                        .map(|&c| match c {
+                            OBS_ICON => Span::from(c.to_string()).red(),
+                            PLAYER_ICON => Span::from(c.to_string()).green(),
+                            BG_ICON => Span::from(c.to_string()).blue(),
+                            _ => Span::from(c.to_string()),
                         })
                         .collect::<Vec<_>>(),
                 )
@@ -398,17 +434,21 @@ impl Widget for &App {
         ];
 
         let game_on_text = vec![
-                Line::from(""),
-                Line::from(vec![
-                    "Score: ".into(),
-                    format!("{:>5}", self.get_final_score()).yellow()
-                ]),
-                Line::from(vec![
-                    "Speed: ".into(),
-                    format!("{:>5}", self.obs_move_after.as_millis()).blue()
-                ]),
-            ];
-        lines.extend(if !self.game_over { game_on_text } else { game_over_text });
+            Line::from(""),
+            Line::from(vec![
+                "Score: ".into(),
+                format!("{:>5}", self.get_final_score()).yellow(),
+            ]),
+            Line::from(vec![
+                "Speed: ".into(),
+                format!("{:>5}", self.obs_move_after.as_millis()).blue(),
+            ]),
+        ];
+        lines.extend(if !self.game_over {
+            game_on_text
+        } else {
+            game_over_text
+        });
 
         let game_text = Text::from(lines);
 
@@ -422,7 +462,7 @@ impl Widget for &App {
 #[derive(Debug)]
 enum PlayerDirection {
     Left,
-    Right
+    Right,
 }
 
 impl PlayerDirection {
@@ -442,7 +482,6 @@ enum PlayerState {
     Dashing(PlayerDirection),
 }
 
-
 #[derive(Debug, Default)]
 struct Player {
     x: usize,
@@ -451,17 +490,21 @@ struct Player {
 }
 
 impl Player {
-    pub fn position(&self) -> (usize, usize) { (self.x, self.y) }
+    pub fn position(&self) -> (usize, usize) {
+        (self.x, self.y)
+    }
 }
 
 #[derive(Debug, Default, Copy, Clone)]
 enum Shape {
     #[default]
     Unit,
-    Triangle, 
-    Brick{ width: usize, height: usize },
+    Triangle,
+    Brick {
+        width: usize,
+        height: usize,
+    },
 }
-
 
 #[derive(Debug, Default)]
 struct Obstacle {
@@ -491,14 +534,15 @@ impl Obstacle {
             },
             ..Default::default()
         }
-
     }
 
     fn move_obstacle(&mut self, dt: Duration) {
         self.time_since_move += dt;
         if self.time_since_move >= self.move_after {
             self.time_since_move -= self.move_after;
-            for (_x, y) in &mut self.cells { *y += 1; }
+            for (_x, y) in &mut self.cells {
+                *y += 1;
+            }
         }
     }
 
@@ -524,7 +568,7 @@ impl DashEffectCollection {
     }
 
     pub fn update(&mut self, dt: Duration) {
-        self.container.retain(|_k, de|{
+        self.container.retain(|_k, de| {
             de.time_since_change += dt;
             if de.time_since_change >= DASH_EFFECT_CHANGE {
                 de.state_idx += 1;
@@ -550,10 +594,13 @@ impl DashEffectCollection {
         let mut cell_idx = 0;
         while state_idx < DASH_ICONS.len() {
             for _ in 0..give_times {
-                self.container.insert(cells[cell_idx], DashEffect{
-                    state_idx,
-                    ..Default::default()
-                });
+                self.container.insert(
+                    cells[cell_idx],
+                    DashEffect {
+                        state_idx,
+                        ..Default::default()
+                    },
+                );
                 cell_idx += 1;
             }
             state_idx += 1;
@@ -562,10 +609,13 @@ impl DashEffectCollection {
         let rem = DASH_LENGTH % DASH_ICONS.len();
         // assert_eq!(idx, 0);
         for _ in 0..rem {
-            self.container.insert(cells[cell_idx], DashEffect{
-                state_idx: state_idx - 1,
-                ..Default::default()
-            });
+            self.container.insert(
+                cells[cell_idx],
+                DashEffect {
+                    state_idx: state_idx - 1,
+                    ..Default::default()
+                },
+            );
             cell_idx += 1;
         }
     }
@@ -582,8 +632,7 @@ fn main() -> io::Result<()> {
 
     fmt()
         .with_env_filter(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new("info"))
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
         )
         .with_writer(log_file)
         .with_ansi(false)
@@ -591,4 +640,3 @@ fn main() -> io::Result<()> {
 
     ratatui::run(|terminal| App::new().run(terminal))
 }
-
