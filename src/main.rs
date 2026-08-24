@@ -1,5 +1,7 @@
-use std::{cell, collections::HashMap, io, time::{Duration, Instant}};
+use std::{fs::File, collections::HashMap, io, time::{Duration, Instant}};
 use rand::distr::{self, Distribution};
+
+use tracing_subscriber::{fmt, EnvFilter};
 
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 
@@ -26,10 +28,10 @@ const PLAYER_ICON: char = '@';
 const OBS_ICON: char = '■';
 
 const DASH_LENGTH: usize = 9;
-const DASH_ICONS: [char; 4] = ['—', '–', '‑', '·'];
-// const DASH_ICONS: [char; 4] = ['█', '▓', '▒', '░'];
+// const DASH_ICONS: [char; 4] = ['—', '–', '‑', '·'];
+const DASH_ICONS: [char; 4] = ['█', '▓', '▒', '░'];
 
-const DASH_EFFECT_CHANGE: Duration = Duration::from_millis(400);
+const DASH_EFFECT_CHANGE: Duration = Duration::from_millis(100);
 
 // Obstacle spawning
 const SPAWN_AFTER_MS: Duration = Duration::from_millis(300);
@@ -115,6 +117,7 @@ impl App {
 
             if self.game_over && self.wants_restart {
                 self.restart_game();
+                last_update = Instant::now();
             }
 
             terminal.draw(|frame| self.draw(frame))?;
@@ -193,8 +196,14 @@ impl App {
         match self.player.move_state {
             PlayerState::Moving(_) | PlayerState::Idle
                 => self.check_collision_helper(&[(self.player.x, self.player.y)]),
-            PlayerState::Dashing(ref p_dir)
-                => self.check_collision_helper(&self.construct_dash_cells(p_dir)),
+            PlayerState::Dashing(ref p_dir) => {
+                // `move_player()` already moved the player to the dash destination.
+                // Use the opposite direction to check collision.
+                // Ty `DeepSeek V4 Flash 0731` for finding this bug.
+                let direction = p_dir.opposite();
+                let dash_cells = self.construct_dash_cells(&direction);
+                self.check_collision_helper(&dash_cells)
+            },
         }
     }
 
@@ -299,6 +308,7 @@ impl App {
         self.player.x = (self.player.x + WIDTH - DASH_LENGTH) % WIDTH;
 
         let cells = self.construct_dash_cells(&PlayerDirection::Right);
+        // tracing::debug!(c = ?cells, "Dash Left");
         self.dash_collection.add(cells.to_vec());
     }
 
@@ -306,6 +316,7 @@ impl App {
         self.player.x = (self.player.x + DASH_LENGTH) % WIDTH;
 
         let cells = self.construct_dash_cells(&PlayerDirection::Left);
+        // tracing::debug!(c = ?cells, "Dash Right");
         self.dash_collection.add(cells.to_vec());
     }
 
@@ -348,15 +359,6 @@ impl Widget for &App {
             .title_bottom(instructions.centered())
             .border_set(border::THICK);
 
-        let game_over_text = Text::from(vec![
-            Line::from("Game Over!"),
-            Line::from(vec![
-                "Final Score: ".into(),
-                self.get_final_score().to_string().yellow(),
-            ]),
-            Line::from("Restart? <r>".blue()),
-        ]);
-
         // 2D array -> vector of lines
         let mut lines: Vec<Line> = self.game_grid
             .iter()
@@ -376,22 +378,31 @@ impl Widget for &App {
             })
             .collect();
 
-        lines.extend(vec![
-            Line::from(""),
+        let game_over_text = vec![
+            Line::from("Game Over!"),
             Line::from(vec![
-                "Score: ".into(),
-                format!("{:>5}", self.get_final_score()).yellow()
+                "Final Score: ".into(),
+                self.get_final_score().to_string().yellow(),
             ]),
-            Line::from(vec![
-                "Speed: ".into(),
-                format!("{:>5}", self.obs_move_after.as_millis()).blue()
-            ]),
-        ]);
+            Line::from("Restart? <r>".blue()),
+        ];
+
+        let game_on_text = vec![
+                Line::from(""),
+                Line::from(vec![
+                    "Score: ".into(),
+                    format!("{:>5}", self.get_final_score()).yellow()
+                ]),
+                Line::from(vec![
+                    "Speed: ".into(),
+                    format!("{:>5}", self.obs_move_after.as_millis()).blue()
+                ]),
+            ];
+        lines.extend(if !self.game_over { game_on_text } else { game_over_text });
 
         let game_text = Text::from(lines);
-        let out_text = if !self.game_over { game_text } else { game_over_text };
 
-        Paragraph::new(out_text)
+        Paragraph::new(game_text)
             .centered()
             .block(block)
             .render(area, buf);
@@ -527,7 +538,6 @@ impl DashEffectCollection {
             return;
         }
 
-        // let mut idx = if give_times > 0 { DASH_ICONS.len() } else { 1 };
         let mut state_idx = 0;
         let mut cell_idx = 0;
         while state_idx < DASH_ICONS.len() {
@@ -545,7 +555,7 @@ impl DashEffectCollection {
         // assert_eq!(idx, 0);
         for _ in 0..rem {
             self.container.insert(cells[cell_idx], DashEffect{
-                state_idx: 0,
+                state_idx: state_idx - 1,
                 ..Default::default()
             });
             cell_idx += 1;
@@ -560,6 +570,17 @@ struct DashEffect {
 }
 
 fn main() -> io::Result<()> {
+    let log_file = File::create("debug.log")?;
+
+    fmt()
+        .with_env_filter(
+            EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| EnvFilter::new("info"))
+        )
+        .with_writer(log_file)
+        .with_ansi(false)
+        .init();
+
     ratatui::run(|terminal| App::new().run(terminal))
 }
 
