@@ -38,6 +38,7 @@ pub struct App {
     game_grid: GameGrid,
     exit: bool,
     game_over: bool,
+    wants_restart: bool,
 
     player: Player,
 
@@ -61,6 +62,7 @@ impl App {
             game_grid: [[BG_ICON; WIDTH]; HEIGHT],
             exit: false,
             game_over: false,
+            wants_restart: false,
 
             player: Player {
                 x: WIDTH / 2,
@@ -101,6 +103,10 @@ impl App {
                 last_update = Instant::now();
             }
 
+            if self.game_over && self.wants_restart {
+                self.restart_game();
+            }
+
             terminal.draw(|frame| self.draw(frame))?;
 
             std::thread::sleep(Duration::from_millis(1));
@@ -111,6 +117,10 @@ impl App {
 
     fn init_game(&mut self) {
         self.game_grid[self.player.y][self.player.x] = PLAYER_ICON;
+    }
+
+    fn restart_game(&mut self) {
+        *self = Self::default();
     }
 
     fn add_obstacle(&mut self, obs: Obstacle) {
@@ -198,13 +208,13 @@ impl App {
     fn handle_key_event(&mut self, key_event: KeyEvent) {
         match key_event.code {
             KeyCode::Char('q') => self.exit(),
-            // KeyCode::Char('h') => self.go_left(),
-            // KeyCode::Char('l') => self.go_right(),
+            KeyCode::Char('r') => if self.game_over { self.wants_restart = true; },
             KeyCode::Char('h') => self.player.move_state = PlayerMoveState::MovingLeft,
             KeyCode::Char('l') => self.player.move_state = PlayerMoveState::MovingRight,
+            // TODO dashing
             // KeyCode::Char('H') => self.dash_left(),
             // KeyCode::Char('L') => self.dash_right(),
-            _ => {}
+            _ => (),
         }
     }
 
@@ -260,7 +270,8 @@ impl Widget for &App {
             Line::from(vec![
                 "Final Score: ".into(),
                 self.get_final_score().to_string().yellow(),
-            ])
+            ]),
+            Line::from("Restart? <r>".blue()),
         ]);
 
         // 2D array -> vector of lines
