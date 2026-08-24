@@ -25,6 +25,8 @@ const BG_ICON: char = '.';
 const PLAYER_ICON: char = '@';
 const OBS_ICON: char = '■';
 
+const DASH_LENGTH: usize = 3;
+
 // Obstacle spawning
 const SPAWN_AFTER_MS: Duration = Duration::from_millis(60);
 const INIT_MOVE_AFTER: Duration = Duration::from_millis(110);
@@ -165,32 +167,65 @@ impl App {
 
     fn move_player(&mut self) {
         match self.player.move_state {
-            PlayerMoveState::MovingLeft => self.go_left(),
-            PlayerMoveState::MovingRight => self.go_right(),
-            PlayerMoveState::Idle => (),
+            PlayerState::Moving(ref p_dir)
+                => match p_dir {
+                    PlayerDirection::Left => self.go_left(),
+                    PlayerDirection::Right => self.go_right(),
+                },
+            PlayerState::Dashing(ref p_dir)
+                => match p_dir {
+                    PlayerDirection::Left => self.dash_left(),
+                    PlayerDirection::Right => self.dash_right(),
+                },
+            PlayerState::Idle => (),
         }
 
-        self.player.move_state = PlayerMoveState::Idle;
+        self.game_over = self.check_collision();
+        self.player.move_state = PlayerState::Idle;
     }
 
     fn check_collision(&self) -> bool {
-        for obs in self.obstacles.values() {
-            // if obs.x == self.player.x && obs.y == self.player.y {
-            if obs.cells.contains(&(self.player.x, self.player.y)) {
-                return true;
-            }
+        match self.player.move_state {
+            PlayerState::Moving(_) | PlayerState::Idle
+                => self.check_collision_helper(&[(self.player.x, self.player.y)]),
+            PlayerState::Dashing(ref p_dir)
+                => self.check_collision_helper(&self.construct_dash_cells(p_dir)),
         }
-        false
     }
+
+    fn construct_dash_cells(&self, p_dir: &PlayerDirection) -> Vec<(usize, usize)> {
+        let mut out = Vec::new();
+        let mut px = self.player.x;
+        let py = self.player.y;
+        match p_dir {
+            PlayerDirection::Left => {
+                for _ in 0..DASH_LENGTH {
+                    px = (px + WIDTH - 1) % WIDTH;
+                    out.push((px, py));
+                }
+            },
+            PlayerDirection::Right => {
+                for _ in 0..DASH_LENGTH {
+                    px = (px + 1) % WIDTH;
+                    out.push((px, py));
+                }
+            },
+        }
+
+        out
+    }
+
+    fn check_collision_helper(&self, targets: &[(usize, usize)]) -> bool {
+        targets.iter().any(|target| {
+            self.obstacles.values().any(|obs| { obs.cells.contains(target) })
+        })
+    }
+
 
     fn update_game(&mut self, dt: Duration) {
         self.move_obstacles(dt);
         self.move_player();
         self.try_spawn_obstacle(dt);
-
-        if self.check_collision() {
-            self.game_over = true;
-        }
 
         self.update_grid();
 
@@ -209,11 +244,14 @@ impl App {
         match key_event.code {
             KeyCode::Char('q') => self.exit(),
             KeyCode::Char('r') => if self.game_over { self.wants_restart = true; },
-            KeyCode::Char('h') => self.player.move_state = PlayerMoveState::MovingLeft,
-            KeyCode::Char('l') => self.player.move_state = PlayerMoveState::MovingRight,
-            // TODO dashing
-            // KeyCode::Char('H') => self.dash_left(),
-            // KeyCode::Char('L') => self.dash_right(),
+            KeyCode::Char('h')
+                => self.player.move_state = PlayerState::Moving(PlayerDirection::Left),
+            KeyCode::Char('l')
+                => self.player.move_state = PlayerState::Moving(PlayerDirection::Right),
+            KeyCode::Char('H')
+                => self.player.move_state = PlayerState::Dashing(PlayerDirection::Left),
+            KeyCode::Char('L')
+                => self.player.move_state = PlayerState::Dashing(PlayerDirection::Right),
             _ => (),
         }
     }
@@ -222,12 +260,21 @@ impl App {
 
 
     fn go_left(&mut self) {
-        self.player.x = if self.player.x == 0 { WIDTH - 1 } else { self.player.x - 1 };
+        self.player.x = (self.player.x + WIDTH - 1) % WIDTH;
     }
 
     fn go_right(&mut self) {
         self.player.x = (self.player.x + 1) % WIDTH;
     }
+
+    fn dash_left(&mut self) {
+        self.player.x = (self.player.x + WIDTH - DASH_LENGTH) % WIDTH;
+    }
+
+    fn dash_right(&mut self) {
+        self.player.x = (self.player.x + DASH_LENGTH) % WIDTH;
+    }
+
 
     fn clear_board(&mut self) {
         for row in &mut self.game_grid { row.fill(BG_ICON); }
@@ -237,6 +284,8 @@ impl App {
         self.clear_board();
 
         self.game_grid[self.player.y][self.player.x] = PLAYER_ICON;
+        // TODO: Add after-dashing effect
+
         for obs in self.obstacles.values() {
             obs.render(&mut self.game_grid);
         }
@@ -315,12 +364,18 @@ impl Widget for &App {
     }
 }
 
+#[derive(Debug)]
+enum PlayerDirection {
+    Left,
+    Right
+}
+
 #[derive(Debug, Default)]
-enum PlayerMoveState {
+enum PlayerState {
     #[default]
     Idle,
-    MovingLeft,
-    MovingRight,
+    Moving(PlayerDirection),
+    Dashing(PlayerDirection),
 }
 
 
@@ -328,7 +383,7 @@ enum PlayerMoveState {
 struct Player {
     x: usize,
     y: usize,
-    move_state: PlayerMoveState,
+    move_state: PlayerState,
 }
 
 #[derive(Debug, Default)]
