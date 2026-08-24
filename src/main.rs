@@ -16,6 +16,8 @@ use ratatui::{
 const WIDTH: usize = 50;
 const HEIGHT: usize = 20; 
 
+type GameGrid = [[char; WIDTH]; HEIGHT];
+
 const TICKS_MS: u64 = 15;
 const TICK_RATE: Duration = Duration::from_millis(TICKS_MS); // ~66.67 FPS
 
@@ -33,12 +35,11 @@ const MIN_MOVE_AFTER: Duration = Duration::from_millis(TICKS_MS + 2);
 
 #[derive(Debug)]
 pub struct App {
-    state: [[char; WIDTH]; HEIGHT],
+    game_grid: GameGrid,
     exit: bool,
     game_over: bool,
 
-    // Player
-    px: usize,
+    player: Player,
 
     // Obstacles
     obstacles: HashMap<u64, Obstacle>, // { id: Obs }
@@ -57,11 +58,15 @@ pub struct App {
 impl App {
     pub fn new() -> Self {
         Self {
-            state: [[BG_ICON; WIDTH]; HEIGHT],
+            game_grid: [[BG_ICON; WIDTH]; HEIGHT],
             exit: false,
             game_over: false,
 
-            px: WIDTH / 2,
+            player: Player {
+                x: WIDTH / 2,
+                y: HEIGHT - 1,
+                ..Default::default()
+            },
 
             obstacles: HashMap::new(),
             obs_id: 0,
@@ -105,7 +110,7 @@ impl App {
     }
 
     fn init_game(&mut self) {
-        self.state[HEIGHT - 1][self.px] = PLAYER_ICON;
+        self.game_grid[self.player.y][self.player.x] = PLAYER_ICON;
     }
 
     fn add_obstacle(&mut self, obs: Obstacle) {
@@ -120,12 +125,8 @@ impl App {
             self.time_after_spawn = Duration::ZERO;
             let x = self.distr.sample(&mut self.rng);
             self.add_obstacle(
-                Obstacle { 
-                    x,
-                    y: 0,
-                    move_after: self.obs_move_after,
-                    time_since_move: Duration::ZERO,
-                }
+                // Obstacle::new(x, 0, self.obs_move_after, Shape::Unit)
+                Obstacle::new(x, 0, self.obs_move_after, Shape::Brick { width: 5, height: 2 })
             );
         }
 
@@ -141,23 +142,31 @@ impl App {
         }
     }
 
-    fn update_obstacles(&mut self, dt: Duration) {
-        // Clean dropped rocks, move falling ones
+    fn move_obstacles(&mut self, dt: Duration) {
+        // Clean obstacles that are OBS
         self.obstacles.retain(|_, obs| {
-            if obs.try_move(dt) {
-                self.state[obs.y - 1][obs.x] = BG_ICON;
-            }
-            let in_bounds = obs.y < HEIGHT;
-            if in_bounds {
-                self.state[obs.y][obs.x] = OBS_ICON;
-            }
-            in_bounds
+            obs.move_obstacle(dt);
+            // Check out of bounds
+            obs.cells.iter().any(|&(_x, y)| {
+                y < HEIGHT
+            })
         });
+    }
+
+    fn move_player(&mut self) {
+        match self.player.move_state {
+            PlayerMoveState::MovingLeft => self.go_left(),
+            PlayerMoveState::MovingRight => self.go_right(),
+            PlayerMoveState::Idle => (),
+        }
+
+        self.player.move_state = PlayerMoveState::Idle;
     }
 
     fn check_collision(&self) -> bool {
         for obs in self.obstacles.values() {
-            if obs.x == self.px && obs.y == HEIGHT - 1 {
+            // if obs.x == self.player.x && obs.y == self.player.y {
+            if obs.cells.contains(&(self.player.x, self.player.y)) {
                 return true;
             }
         }
@@ -165,12 +174,15 @@ impl App {
     }
 
     fn update_game(&mut self, dt: Duration) {
-        self.update_obstacles(dt);
+        self.move_obstacles(dt);
+        self.move_player();
         self.try_spawn_obstacle(dt);
 
         if self.check_collision() {
             self.game_over = true;
         }
+
+        self.update_grid();
 
         self.elapsed_time += dt;
     }
@@ -186,25 +198,38 @@ impl App {
     fn handle_key_event(&mut self, key_event: KeyEvent) {
         match key_event.code {
             KeyCode::Char('q') => self.exit(),
-            KeyCode::Char('h') => self.go_left(),
-            KeyCode::Char('l') => self.go_right(),
+            // KeyCode::Char('h') => self.go_left(),
+            // KeyCode::Char('l') => self.go_right(),
+            KeyCode::Char('h') => self.player.move_state = PlayerMoveState::MovingLeft,
+            KeyCode::Char('l') => self.player.move_state = PlayerMoveState::MovingRight,
+            // KeyCode::Char('H') => self.dash_left(),
+            // KeyCode::Char('L') => self.dash_right(),
             _ => {}
         }
     }
 
     fn get_final_score(&self) -> u128 { self.elapsed_time.as_millis() / 10 }
 
+
     fn go_left(&mut self) {
-        // TODO: Refactor left and right
-        self.state[HEIGHT-1][self.px] = BG_ICON;
-        self.px = if self.px == 0 { WIDTH - 1 } else { self.px - 1 };
-        self.state[HEIGHT-1][self.px] = PLAYER_ICON;
+        self.player.x = if self.player.x == 0 { WIDTH - 1 } else { self.player.x - 1 };
     }
 
     fn go_right(&mut self) {
-        self.state[HEIGHT-1][self.px] = BG_ICON;
-        self.px = (self.px + 1) % WIDTH;
-        self.state[HEIGHT-1][self.px] = PLAYER_ICON;
+        self.player.x = (self.player.x + 1) % WIDTH;
+    }
+
+    fn clear_board(&mut self) {
+        for row in &mut self.game_grid { row.fill(BG_ICON); }
+    }
+
+    fn update_grid(&mut self) {
+        self.clear_board();
+
+        self.game_grid[self.player.y][self.player.x] = PLAYER_ICON;
+        for obs in self.obstacles.values() {
+            obs.render(&mut self.game_grid);
+        }
     }
 }
 
@@ -239,7 +264,7 @@ impl Widget for &App {
         ]);
 
         // 2D array -> vector of lines
-        let mut lines: Vec<Line> = self.state
+        let mut lines: Vec<Line> = self.game_grid
             .iter()
             .map(|row| {
                 Line::from(
@@ -280,25 +305,81 @@ impl Widget for &App {
 }
 
 #[derive(Debug, Default)]
-struct Obstacle {
+enum PlayerMoveState {
+    #[default]
+    Idle,
+    MovingLeft,
+    MovingRight,
+}
+
+
+#[derive(Debug, Default)]
+struct Player {
     x: usize,
     y: usize,
+    move_state: PlayerMoveState,
+}
+
+#[derive(Debug, Default)]
+enum Shape {
+    #[default]
+    Unit,
+    Triangle, 
+    Brick{ width: usize, height: usize },
+}
+
+
+#[derive(Debug, Default)]
+struct Obstacle {
+    cells: Vec<(usize, usize)>,
+    // shape: Shape, 
     move_after: Duration,
     time_since_move: Duration,
 }
 
 impl Obstacle {
-    fn try_move(&mut self, dt: Duration) -> bool {
+    fn new(x: usize, y: usize, move_after: Duration, shape: Shape) -> Self {
+        Obstacle {
+            move_after,
+            cells: match shape {
+                Shape::Unit => vec![(x, y)],
+                Shape::Triangle => vec![(x, y), (x - 1, y + 1), (x + 1, y + 1)],
+                Shape::Brick { width, height } => {
+                    // TODO: For now, it's top-left corner (would be nice if the brick came from top
+                    // out of bounds later
+                    let mut out = Vec::new();
+                    for dx in 0..width {
+                        for dy in 0..height {
+                            out.push((x + dx, y + dy));
+                        }
+                    }
+                    out
+                }
+            },
+            // shape,
+            ..Default::default()
+        }
+
+    }
+
+    fn move_obstacle(&mut self, dt: Duration) {
         self.time_since_move += dt;
         if self.time_since_move >= self.move_after {
             self.time_since_move = Duration::ZERO;
-            self.y += 1;
-            return true;
+            for (_x, y) in &mut self.cells { *y += 1; }
         }
-        false
+    }
+
+    fn render(&self, game_grid: &mut GameGrid) {
+        for (x, y) in &self.cells {
+            if *y < HEIGHT && *x < WIDTH {
+                game_grid[*y][*x] = OBS_ICON
+            }
+        }
     }
 }
 
-fn main() -> io::Result<()> { ratatui::run(|terminal| App::new().run(terminal))
+fn main() -> io::Result<()> {
+    ratatui::run(|terminal| App::new().run(terminal))
 }
 
