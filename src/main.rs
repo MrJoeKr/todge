@@ -1,5 +1,5 @@
 use std::{fs::File, collections::HashMap, io, time::{Duration, Instant}};
-use rand::distr::{self, Distribution};
+use rand::{distr::{self, Distribution}, seq::IndexedRandom};
 
 use tracing_subscriber::{fmt, EnvFilter};
 
@@ -40,6 +40,14 @@ const INCREASE_SPEED_BY: Duration = Duration::from_millis(10);
 const INIT_SPEEDUP_AFTER: Duration = Duration::from_millis(1000);
 const SLOW_SPEEDUP: Duration = Duration::from_millis(100);
 const MIN_MOVE_AFTER: Duration = Duration::from_millis(TICKS_MS + 2);
+
+const SPAWN_SHAPES: &[(Shape, u32)] = &[
+    (Shape::Unit, 45),
+    (Shape::Triangle, 10),
+    (Shape::Brick { width: 5, height: 2 }, 25),
+    (Shape::Brick { width: 2, height: 6 }, 10),
+    (Shape::Brick { width: 10, height: 3 }, 10),
+];
 
 #[derive(Debug)]
 pub struct App {
@@ -147,10 +155,12 @@ impl App {
         if self.time_after_spawn >= SPAWN_AFTER_MS {
             self.time_after_spawn -= SPAWN_AFTER_MS;
             let x = self.distr.sample(&mut self.rng);
-            self.add_obstacle(
-                // Obstacle::new(x, 0, self.obs_move_after, Shape::Unit)
-                Obstacle::new(x, 0, self.obs_move_after, Shape::Brick { width: 5, height: 2 })
-            );
+            let chosen_shape =
+                SPAWN_SHAPES.choose_weighted(&mut self.rng, |item| item.1).unwrap().0;
+
+            self.add_obstacle({
+                Obstacle::new(x, 0, self.obs_move_after, chosen_shape)
+            });
         }
 
         if self.time_after_speedup >= self.speedup_after {
@@ -444,7 +454,7 @@ impl Player {
     pub fn position(&self) -> (usize, usize) { (self.x, self.y) }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Copy, Clone)]
 enum Shape {
     #[default]
     Unit,
@@ -456,7 +466,6 @@ enum Shape {
 #[derive(Debug, Default)]
 struct Obstacle {
     cells: Vec<(usize, usize)>,
-    // shape: Shape, 
     move_after: Duration,
     time_since_move: Duration,
 }
@@ -480,7 +489,6 @@ impl Obstacle {
                     out
                 }
             },
-            // shape,
             ..Default::default()
         }
 
