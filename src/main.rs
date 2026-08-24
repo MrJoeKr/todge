@@ -1,4 +1,4 @@
-use std::{collections::HashMap, io, time::{Duration, Instant}};
+use std::{cell, collections::HashMap, io, time::{Duration, Instant}};
 use rand::distr::{self, Distribution};
 
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
@@ -25,11 +25,15 @@ const BG_ICON: char = '.';
 const PLAYER_ICON: char = '@';
 const OBS_ICON: char = '■';
 
-const DASH_LENGTH: usize = 3;
+const DASH_LENGTH: usize = 9;
+const DASH_ICONS: [char; 4] = ['—', '–', '‑', '·'];
+// const DASH_ICONS: [char; 4] = ['█', '▓', '▒', '░'];
+
+const DASH_EFFECT_CHANGE: Duration = Duration::from_millis(400);
 
 // Obstacle spawning
-const SPAWN_AFTER_MS: Duration = Duration::from_millis(60);
-const INIT_MOVE_AFTER: Duration = Duration::from_millis(110);
+const SPAWN_AFTER_MS: Duration = Duration::from_millis(300);
+const INIT_MOVE_AFTER: Duration = Duration::from_millis(300);
 const INCREASE_SPEED_BY: Duration = Duration::from_millis(10);
 const INIT_SPEEDUP_AFTER: Duration = Duration::from_millis(1000);
 const SLOW_SPEEDUP: Duration = Duration::from_millis(100);
@@ -51,6 +55,8 @@ pub struct App {
     speedup_after: Duration,
     time_after_spawn: Duration,
     time_after_speedup: Duration,
+
+    dash_collection: DashEffectCollection,
 
     elapsed_time: Duration,
 
@@ -78,6 +84,8 @@ impl App {
             speedup_after: INIT_SPEEDUP_AFTER,
             time_after_spawn: Duration::ZERO,
             time_after_speedup: Duration::ZERO,
+
+            dash_collection: DashEffectCollection::default(),
 
             elapsed_time: Duration::ZERO,
 
@@ -134,7 +142,7 @@ impl App {
         self.time_after_spawn += dt;
         self.time_after_speedup += dt;
         if self.time_after_spawn >= SPAWN_AFTER_MS {
-            self.time_after_spawn = Duration::ZERO;
+            self.time_after_spawn -= SPAWN_AFTER_MS;
             let x = self.distr.sample(&mut self.rng);
             self.add_obstacle(
                 // Obstacle::new(x, 0, self.obs_move_after, Shape::Unit)
@@ -143,7 +151,7 @@ impl App {
         }
 
         if self.time_after_speedup >= self.speedup_after {
-            self.time_after_speedup = Duration::ZERO;
+            self.time_after_speedup -= self.speedup_after;
 
             if let Some(value) = self.obs_move_after.checked_sub(INCREASE_SPEED_BY) 
                     && value >= MIN_MOVE_AFTER {
@@ -179,9 +187,6 @@ impl App {
                 },
             PlayerState::Idle => (),
         }
-
-        self.game_over = self.check_collision();
-        self.player.move_state = PlayerState::Idle;
     }
 
     fn check_collision(&self) -> bool {
@@ -193,8 +198,9 @@ impl App {
         }
     }
 
+    /// Return positions in chronological order of dashing
     fn construct_dash_cells(&self, p_dir: &PlayerDirection) -> Vec<(usize, usize)> {
-        let mut out = Vec::new();
+        let mut out = vec![(self.player.x, self.player.y)];
         let mut px = self.player.x;
         let py = self.player.y;
         match p_dir {
@@ -221,15 +227,37 @@ impl App {
         })
     }
 
+    fn drop_colliding_dashes_helper(&mut self, targets: &[(usize, usize)]) {
+        // self.dash_collection.container.keys().any(|pos| { targets.contains(pos) })
+        self.dash_collection.container.retain(|pos, _de| {
+            !targets.contains(pos)
+        });
+    }
+
+    fn drop_colliding_dashes(&mut self) {
+        // Player + obstacles
+        let mut targets = vec![self.player.position()];
+
+        let obstacles = self.obstacles.values().flat_map(|obs| { &obs.cells });
+        targets.extend(obstacles);
+
+        self.drop_colliding_dashes_helper(&targets);
+    }
 
     fn update_game(&mut self, dt: Duration) {
         self.move_obstacles(dt);
         self.move_player();
+        self.game_over = self.check_collision();
+
         self.try_spawn_obstacle(dt);
+
+        self.dash_collection.update(dt);
+        self.drop_colliding_dashes();
 
         self.update_grid();
 
         self.elapsed_time += dt;
+        self.player.move_state = PlayerState::Idle;
     }
 
     fn draw(&self, frame: &mut Frame) {
@@ -269,12 +297,17 @@ impl App {
 
     fn dash_left(&mut self) {
         self.player.x = (self.player.x + WIDTH - DASH_LENGTH) % WIDTH;
+
+        let cells = self.construct_dash_cells(&PlayerDirection::Right);
+        self.dash_collection.add(cells.to_vec());
     }
 
     fn dash_right(&mut self) {
         self.player.x = (self.player.x + DASH_LENGTH) % WIDTH;
-    }
 
+        let cells = self.construct_dash_cells(&PlayerDirection::Left);
+        self.dash_collection.add(cells.to_vec());
+    }
 
     fn clear_board(&mut self) {
         for row in &mut self.game_grid { row.fill(BG_ICON); }
@@ -284,7 +317,8 @@ impl App {
         self.clear_board();
 
         self.game_grid[self.player.y][self.player.x] = PLAYER_ICON;
-        // TODO: Add after-dashing effect
+
+        self.dash_collection.render(&mut self.game_grid);
 
         for obs in self.obstacles.values() {
             obs.render(&mut self.game_grid);
@@ -303,9 +337,9 @@ impl Widget for &App {
         let title = Line::from(" todge. ".bold());
         let instructions = Line::from(vec![
             " Left ".into(),
-            "<h>".blue().bold(),
+            "<h/H>".blue().bold(),
             " Right ".into(),
-            "<l>".blue().bold(),
+            "<l/L>".blue().bold(),
             " Quit ".into(),
             "<q> ".blue().bold(),
         ]);
@@ -370,6 +404,15 @@ enum PlayerDirection {
     Right
 }
 
+impl PlayerDirection {
+    pub fn opposite(&self) -> Self {
+        match self {
+            PlayerDirection::Left => PlayerDirection::Right,
+            PlayerDirection::Right => PlayerDirection::Left,
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 enum PlayerState {
     #[default]
@@ -384,6 +427,10 @@ struct Player {
     x: usize,
     y: usize,
     move_state: PlayerState,
+}
+
+impl Player {
+    pub fn position(&self) -> (usize, usize) { (self.x, self.y) }
 }
 
 #[derive(Debug, Default)]
@@ -431,7 +478,7 @@ impl Obstacle {
     fn move_obstacle(&mut self, dt: Duration) {
         self.time_since_move += dt;
         if self.time_since_move >= self.move_after {
-            self.time_since_move = Duration::ZERO;
+            self.time_since_move -= self.move_after;
             for (_x, y) in &mut self.cells { *y += 1; }
         }
     }
@@ -443,6 +490,73 @@ impl Obstacle {
             }
         }
     }
+}
+
+#[derive(Debug, Default)]
+struct DashEffectCollection {
+    container: HashMap<(usize, usize), DashEffect>,
+}
+
+impl DashEffectCollection {
+    pub fn render(&self, game_grid: &mut GameGrid) {
+        for ((x, y), de) in &self.container {
+            game_grid[*y][*x] = DASH_ICONS[de.state_idx];
+        }
+    }
+
+    pub fn update(&mut self, dt: Duration) {
+        self.container.retain(|_k, de|{
+            de.time_since_change += dt;
+            if de.time_since_change >= DASH_EFFECT_CHANGE {
+                de.state_idx += 1;
+                de.time_since_change -= DASH_EFFECT_CHANGE;
+            }
+            de.state_idx < DASH_ICONS.len()
+        });
+    }
+
+    pub fn add(&mut self, cells: Vec<(usize, usize)>) {
+        assert_eq!(cells.len(), DASH_LENGTH + 1);
+
+        let give_times = DASH_LENGTH / DASH_ICONS.len();
+
+        if give_times == 0 {
+            for cell in cells {
+                self.container.insert(cell, DashEffect::default());
+            }
+            return;
+        }
+
+        // let mut idx = if give_times > 0 { DASH_ICONS.len() } else { 1 };
+        let mut state_idx = 0;
+        let mut cell_idx = 0;
+        while state_idx < DASH_ICONS.len() {
+            for _ in 0..give_times {
+                self.container.insert(cells[cell_idx], DashEffect{
+                    state_idx,
+                    ..Default::default()
+                });
+                cell_idx += 1;
+            }
+            state_idx += 1;
+        }
+
+        let rem = DASH_LENGTH % DASH_ICONS.len();
+        // assert_eq!(idx, 0);
+        for _ in 0..rem {
+            self.container.insert(cells[cell_idx], DashEffect{
+                state_idx: 0,
+                ..Default::default()
+            });
+            cell_idx += 1;
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+struct DashEffect {
+    state_idx: usize,
+    time_since_change: Duration,
 }
 
 fn main() -> io::Result<()> {
