@@ -1,7 +1,7 @@
 use crate::config::*;
 use crate::dash::DashEffectCollection;
 use crate::obstacle::Obstacle;
-use crate::player::{Player, PlayerDirection, PlayerState};
+use crate::player::{HDirection, Player, PlayerState, VDirection};
 
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use rand::{
@@ -171,13 +171,17 @@ impl App {
 
     fn move_player(&mut self) {
         match self.player.move_state {
-            PlayerState::Moving(ref p_dir) => match p_dir {
-                PlayerDirection::Left => self.go_left(),
-                PlayerDirection::Right => self.go_right(),
+            PlayerState::Moving(ref h_dir) => match h_dir {
+                HDirection::Left => self.go_left(),
+                HDirection::Right => self.go_right(),
             },
-            PlayerState::Dashing(ref p_dir) => match p_dir {
-                PlayerDirection::Left => self.dash_left(),
-                PlayerDirection::Right => self.dash_right(),
+            PlayerState::Dashing(ref h_dir) => match h_dir {
+                HDirection::Left => self.dash_left(),
+                HDirection::Right => self.dash_right(),
+            },
+            PlayerState::Flying(ref v_dir) => match v_dir {
+                VDirection::Up => self.go_up(),
+                VDirection::Down => self.go_down(),
             },
             PlayerState::Idle => (),
         }
@@ -185,9 +189,9 @@ impl App {
 
     fn check_collision(&self) -> bool {
         match self.player.move_state {
-            PlayerState::Moving(_) | PlayerState::Idle => {
+            PlayerState::Moving(_) | PlayerState::Flying(_) | PlayerState::Idle => {
                 self.check_collision_helper(&[(self.player.x, self.player.y)])
-            }
+            },
             PlayerState::Dashing(ref p_dir) => {
                 // `move_player()` already moved the player to the dash destination.
                 // Use the opposite direction to check collision.
@@ -195,23 +199,23 @@ impl App {
                 let direction = p_dir.opposite();
                 let dash_cells = self.construct_dash_cells(&direction);
                 self.check_collision_helper(&dash_cells)
-            }
+            },
         }
     }
 
     /// Return positions in chronological order of dashing
-    fn construct_dash_cells(&self, p_dir: &PlayerDirection) -> Vec<(usize, usize)> {
+    fn construct_dash_cells(&self, p_dir: &HDirection) -> Vec<(usize, usize)> {
         let mut out = vec![(self.player.x, self.player.y)];
         let mut px = self.player.x;
         let py = self.player.y;
         match p_dir {
-            PlayerDirection::Left => {
+            HDirection::Left => {
                 for _ in 0..DASH_LENGTH {
                     px = (px + WIDTH - 1) % WIDTH;
                     out.push((px, py));
                 }
             }
-            PlayerDirection::Right => {
+            HDirection::Right => {
                 for _ in 0..DASH_LENGTH {
                     px = (px + 1) % WIDTH;
                     out.push((px, py));
@@ -276,24 +280,18 @@ impl App {
 
     fn handle_key_event(&mut self, key_event: KeyEvent) {
         match key_event.code {
-            KeyCode::Char('q') => self.exit(),
-            KeyCode::Char('r') => {
+            KeyCode::Char(keybinds::QUIT) => self.exit(),
+            KeyCode::Char(keybinds::RESTART) => {
                 if self.game_over {
                     self.wants_restart = true;
                 }
             }
-            KeyCode::Char('h') => {
-                self.player.move_state = PlayerState::Moving(PlayerDirection::Left)
-            }
-            KeyCode::Char('l') => {
-                self.player.move_state = PlayerState::Moving(PlayerDirection::Right)
-            }
-            KeyCode::Char('H') => {
-                self.player.move_state = PlayerState::Dashing(PlayerDirection::Left)
-            }
-            KeyCode::Char('L') => {
-                self.player.move_state = PlayerState::Dashing(PlayerDirection::Right)
-            }
+            KeyCode::Char(keybinds::LEFT) => self.player.move_state = PlayerState::Moving(HDirection::Left),
+            KeyCode::Char(keybinds::RIGHT) => self.player.move_state = PlayerState::Moving(HDirection::Right),
+            KeyCode::Char(keybinds::DASH_LEFT) => self.player.move_state = PlayerState::Dashing(HDirection::Left),
+            KeyCode::Char(keybinds::DASH_RIGHT) => self.player.move_state = PlayerState::Dashing(HDirection::Right),
+            KeyCode::Char(keybinds::UP) => self.player.move_state = PlayerState::Flying(VDirection::Up),
+            KeyCode::Char(keybinds::DOWN) => self.player.move_state = PlayerState::Flying(VDirection::Down),
             _ => (),
         }
     }
@@ -310,10 +308,18 @@ impl App {
         self.player.x = (self.player.x + 1) % WIDTH;
     }
 
+    fn go_up(&mut self) {
+        self.player.y = self.player.y.saturating_sub(1);
+    }
+
+    fn go_down(&mut self) {
+        self.player.y = (self.player.y + 1).min(HEIGHT - 1);
+    }
+
     fn dash_left(&mut self) {
         self.player.x = (self.player.x + WIDTH - DASH_LENGTH) % WIDTH;
 
-        let cells = self.construct_dash_cells(&PlayerDirection::Right);
+        let cells = self.construct_dash_cells(&HDirection::Right);
         // tracing::debug!(c = ?cells, "Dash Left");
         self.dash_collection.add(cells.to_vec());
     }
@@ -321,7 +327,7 @@ impl App {
     fn dash_right(&mut self) {
         self.player.x = (self.player.x + DASH_LENGTH) % WIDTH;
 
-        let cells = self.construct_dash_cells(&PlayerDirection::Left);
+        let cells = self.construct_dash_cells(&HDirection::Left);
         // tracing::debug!(c = ?cells, "Dash Right");
         self.dash_collection.add(cells.to_vec());
     }
@@ -356,11 +362,16 @@ impl Widget for &App {
         let title = Line::from(" todge. ".bold());
         let instructions = Line::from(vec![
             " Left ".into(),
-            "<h/H>".blue().bold(),
+            // "<h/H>".blue().bold(),
+            format!("<{}/{}>", keybinds::LEFT, keybinds::DASH_LEFT).blue().bold(),
             " Right ".into(),
-            "<l/L>".blue().bold(),
+            // "<l/L>".blue().bold(),
+            format!("<{}/{}>", keybinds::RIGHT, keybinds::DASH_RIGHT).blue().bold(),
+            " Up/Down ".into(),
+            format!("<{}/{}>", keybinds::UP, keybinds::DOWN).blue().bold(),
             " Quit ".into(),
-            "<q> ".blue().bold(),
+            // "<q> ".blue().bold(),
+            format!("<{}>", keybinds::QUIT).blue().bold(),
         ]);
         let block = Block::bordered()
             .title(title.centered())

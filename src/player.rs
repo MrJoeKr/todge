@@ -1,14 +1,20 @@
 #[derive(Debug)]
-pub enum PlayerDirection {
+pub enum HDirection {
     Left,
     Right,
 }
 
-impl PlayerDirection {
+#[derive(Debug)]
+pub enum VDirection {
+    Up,
+    Down,
+}
+
+impl HDirection {
     pub fn opposite(&self) -> Self {
         match self {
-            PlayerDirection::Left => PlayerDirection::Right,
-            PlayerDirection::Right => PlayerDirection::Left,
+            HDirection::Left => HDirection::Right,
+            HDirection::Right => HDirection::Left,
         }
     }
 }
@@ -17,8 +23,9 @@ impl PlayerDirection {
 pub enum PlayerState {
     #[default]
     Idle,
-    Moving(PlayerDirection),
-    Dashing(PlayerDirection),
+    Moving(HDirection),
+    Dashing(HDirection),
+    Flying(VDirection),
 }
 
 #[derive(Debug, Default)]

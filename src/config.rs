@@ -1,6 +1,8 @@
 use crate::obstacle;
 use std::time::Duration;
 
+pub mod keybinds;
+
 pub const WIDTH: usize = 50;
 pub const HEIGHT: usize = 20;
 
@@ -21,7 +23,7 @@ pub const DASH_EFFECT_CHANGE: Duration = Duration::from_millis(100);
 
 // Obstacle spawning
 pub const SPAWN_AFTER_MS: Duration = Duration::from_millis(500);
-pub const INIT_SPEED: f64 = 2.0;
+pub const INIT_SPEED: f64 = 5.0;
 pub const INCREASE_SPEED_BY: f64 = 1.0;
 pub const INIT_SPEEDUP_AFTER: Duration = Duration::from_millis(1000);
 pub const SLOW_SPEEDUP: Duration = Duration::from_millis(100);
@@ -55,5 +57,11 @@ pub const SPAWN_SHAPES: &[(obstacle::Shape, u32)] = &[
 
 pub const OBSTACLE_TRAJECTORIES: &[(obstacle::Trajectory, u32)] = &[
     (obstacle::Trajectory::Straight, 80),
-    (obstacle::Trajectory::Sine { amp: 3.0, freq: 0.5 }, 20),
+    (
+        obstacle::Trajectory::Sine {
+            amp: 3.0,
+            freq: 0.5,
+        },
+        20,
+    ),
 ];
