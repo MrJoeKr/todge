@@ -1,6 +1,8 @@
 # TODO
 
-* [ ] Refactor and organize to files
+* [ ] Make obstacles spawn out of upper bounds and then come down
+
+* [x] Refactor and organize to files
 * [ ] Add various movement
 * [ ] Different colors for different shapes
 * [ ] Maybe special superpower to destroy obstacles for a short period of time
