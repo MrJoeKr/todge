@@ -1,4 +1,4 @@
-use crate::config::*;
+use crate::{config::*, obstacle};
 use crate::dash::DashEffectCollection;
 use crate::obstacle::Obstacle;
 use crate::player::{Player, PlayerDirection, PlayerState};
@@ -35,7 +35,7 @@ pub struct App {
     // Obstacles
     obstacles: HashMap<u64, Obstacle>, // { id: Obs }
     obs_id: u64,
-    obs_move_after: Duration,
+    obs_speed: f64,
     speedup_after: Duration,
     time_after_spawn: Duration,
     time_after_speedup: Duration,
@@ -64,7 +64,7 @@ impl App {
 
             obstacles: HashMap::new(),
             obs_id: 0,
-            obs_move_after: INIT_MOVE_AFTER,
+            obs_speed: INIT_SPEED,
             speedup_after: INIT_SPEEDUP_AFTER,
             time_after_spawn: Duration::ZERO,
             time_after_speedup: Duration::ZERO,
@@ -127,35 +127,44 @@ impl App {
         self.time_after_spawn += dt;
         self.time_after_speedup += dt;
         if self.time_after_spawn >= SPAWN_AFTER_MS {
-            self.time_after_spawn -= SPAWN_AFTER_MS;
-            let x = self.distr.sample(&mut self.rng);
-            let chosen_shape = SPAWN_SHAPES
-                .choose_weighted(&mut self.rng, |item| item.1)
-                .unwrap()
-                .0;
-
-            self.add_obstacle(Obstacle::new(x, 0, self.obs_move_after, chosen_shape));
+            self.spawn_obstacle();
         }
 
         if self.time_after_speedup >= self.speedup_after {
             self.time_after_speedup -= self.speedup_after;
 
-            if let Some(value) = self.obs_move_after.checked_sub(INCREASE_SPEED_BY)
-                && value >= MIN_MOVE_AFTER
-            {
-                self.obs_move_after = value;
-            }
-
+            self.obs_speed += INCREASE_SPEED_BY;
             self.speedup_after += SLOW_SPEEDUP;
         }
     }
 
-    fn move_obstacles(&mut self, dt: Duration) {
+    fn spawn_obstacle(&mut self) {
+        self.time_after_spawn -= SPAWN_AFTER_MS;
+        let x = self.distr.sample(&mut self.rng);
+        let chosen_shape = SPAWN_SHAPES
+            .choose_weighted(&mut self.rng, |item| item.1)
+            .unwrap()
+            .0;
+
+        let chosen_trajectory = OBSTACLE_TRAJECTORIES
+            .choose_weighted(&mut self.rng, |item| item.1)
+            .unwrap()
+            .0;
+
+        let dya = -1.0;
+        self.add_obstacle(Obstacle::new(
+                (x as f64, dya),
+                self.obs_speed,
+                chosen_shape,
+                chosen_trajectory,
+        ));
+    }
+
+    fn update_obstacles(&mut self, dt: Duration) {
         // Clean obstacles that are OBS
         self.obstacles.retain(|_, obs| {
-            obs.move_obstacle(dt);
-            // Check out of bounds
-            obs.cells.iter().any(|&(_x, y)| y < HEIGHT)
+            obs.update(dt);
+            obs.cells().any(|(_, y)| y < HEIGHT as i32)
         });
     }
 
@@ -213,15 +222,14 @@ impl App {
     }
 
     fn check_collision_helper(&self, targets: &[(usize, usize)]) -> bool {
-        targets.iter().any(|target| {
+        targets.iter().any(|&(tx, ty)| {
             self.obstacles
                 .values()
-                .any(|obs| obs.cells.contains(target))
+                .any(|obs| obs.cells().any(|cell| cell == (tx as i32, ty as i32)))
         })
     }
 
     fn drop_colliding_dashes_helper(&mut self, targets: &[(usize, usize)]) {
-        // self.dash_collection.container.keys().any(|pos| { targets.contains(pos) })
         self.dash_collection
             .container
             .retain(|pos, _de| !targets.contains(pos));
@@ -231,14 +239,18 @@ impl App {
         // Player + obstacles
         let mut targets = vec![self.player.position()];
 
-        let obstacles = self.obstacles.values().flat_map(|obs| &obs.cells);
+        let obstacles = self.obstacles.values().flat_map(|obs| {
+            obs.cells()
+                .filter(|&(x, y)| 0 <= x && x <= WIDTH as i32 && 0 <= y && y <= HEIGHT as i32)
+                .map(|(x, y)| (x as usize, y as usize))
+        });
         targets.extend(obstacles);
 
         self.drop_colliding_dashes_helper(&targets);
     }
 
     fn update_game(&mut self, dt: Duration) {
-        self.move_obstacles(dt);
+        self.update_obstacles(dt);
         self.move_player();
         self.game_over = self.check_collision();
 
@@ -389,7 +401,7 @@ impl Widget for &App {
             ]),
             Line::from(vec![
                 "Speed: ".into(),
-                format!("{:>5}", self.obs_move_after.as_millis()).blue(),
+                format!("{:>5} cells/s", self.obs_speed).blue(),
             ]),
         ];
         lines.extend(if !self.game_over {

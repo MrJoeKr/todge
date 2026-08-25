@@ -1,6 +1,6 @@
 # TODO
 
-* [ ] Make obstacles spawn out of upper bounds and then come down
+* [ ] Find a good way to init obstacle instead of using `::new`
 
 * [x] Refactor and organize to files
 * [ ] Add various movement
@@ -15,4 +15,22 @@
 
 * [x] Add restart button after game over
 * [x] Random shapes spawning
+* [x] Test scenarios (`cargo run -- -s <name>`, see `src/scenario.rs`)
 
+## Mechanics
+
+* [ ] Make obstacles spawn out of upper bounds and then come down
+
+* [ ] Cool mechanic idea:
+    - Add the option that the player can move up on the grid.
+    - When he is above ground, there's a progress bar for an ultimate ability. The closer the player is to the ceiling, the quicker the progress bar increases. (linearly: ultimate_bar = K * p_y)
+    - Once the bar is 100%, the player can use a button to use it
+    - Using it teleports them on the ground, giving invincibility
+
+* [ ] Small chance of extra life powerup falling from the sky
+
+## Study Rust Concepts
+
+* [ ] Lifetimes
+* [ ] opaque return types
+* [x] Modules, crates, use

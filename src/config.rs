@@ -20,12 +20,12 @@ pub const DASH_ICONS: [char; 4] = ['█', '▓', '▒', '░'];
 pub const DASH_EFFECT_CHANGE: Duration = Duration::from_millis(100);
 
 // Obstacle spawning
-pub const SPAWN_AFTER_MS: Duration = Duration::from_millis(300);
-pub const INIT_MOVE_AFTER: Duration = Duration::from_millis(300);
-pub const INCREASE_SPEED_BY: Duration = Duration::from_millis(10);
+pub const SPAWN_AFTER_MS: Duration = Duration::from_millis(500);
+pub const INIT_SPEED: f64 = 2.0;
+pub const INCREASE_SPEED_BY: f64 = 1.0;
 pub const INIT_SPEEDUP_AFTER: Duration = Duration::from_millis(1000);
 pub const SLOW_SPEEDUP: Duration = Duration::from_millis(100);
-pub const MIN_MOVE_AFTER: Duration = Duration::from_millis(TICKS_MS + 2);
+pub const MAX_SPEED: f64 = 64.67;
 
 pub const SPAWN_SHAPES: &[(obstacle::Shape, u32)] = &[
     (obstacle::Shape::Unit, 45),
@@ -51,4 +51,9 @@ pub const SPAWN_SHAPES: &[(obstacle::Shape, u32)] = &[
         },
         10,
     ),
+];
+
+pub const OBSTACLE_TRAJECTORIES: &[(obstacle::Trajectory, u32)] = &[
+    (obstacle::Trajectory::Straight, 80),
+    (obstacle::Trajectory::Sine { amp: 3.0, freq: 0.5 }, 20),
 ];
