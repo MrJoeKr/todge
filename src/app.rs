@@ -1,4 +1,4 @@
-use crate::{config::*, obstacle};
+use crate::config::*;
 use crate::dash::DashEffectCollection;
 use crate::obstacle::Obstacle;
 use crate::player::{Player, PlayerDirection, PlayerState};
@@ -133,7 +133,7 @@ impl App {
         if self.time_after_speedup >= self.speedup_after {
             self.time_after_speedup -= self.speedup_after;
 
-            self.obs_speed += INCREASE_SPEED_BY;
+            self.obs_speed = MAX_SPEED.min(self.obs_speed + INCREASE_SPEED_BY);
             self.speedup_after += SLOW_SPEEDUP;
         }
     }
@@ -153,10 +153,10 @@ impl App {
 
         let dya = -1.0;
         self.add_obstacle(Obstacle::new(
-                (x as f64, dya),
-                self.obs_speed,
-                chosen_shape,
-                chosen_trajectory,
+            (x as f64, dya),
+            self.obs_speed,
+            chosen_shape,
+            chosen_trajectory,
         ));
     }
 
