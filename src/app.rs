@@ -151,13 +151,14 @@ impl App {
             .unwrap()
             .0;
 
-        let dya = -1.0;
-        self.add_obstacle(Obstacle::new(
-            (x as f64, dya),
-            self.obs_speed,
-            chosen_shape,
-            chosen_trajectory,
-        ));
+        self.add_obstacle(Obstacle {
+            spawn_x: x as f64,
+            spawn_y: -1.0,
+            speed: self.obs_speed,
+            shape: chosen_shape,
+            trajectory: chosen_trajectory,
+            ..Default::default()
+        });
     }
 
     fn update_obstacles(&mut self, dt: Duration) {
