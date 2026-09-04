@@ -1,10 +1,16 @@
 # TODO
 
-* [ ] Find a good way to init obstacle instead of using `::new`
+* [ ] Fix destroy obstacles by touching does not consider the player
+
+* [x] Find a good way to init obstacle instead of using `::new`
 
 * [x] Refactor and organize to files
 * [x] Add various movement
+
 * [ ] Different colors for different shapes
+  - Requires adding information to game grid... or does it?
+  - Well at least we need to set it to ratatui type Span (instead of chars, I think...)
+
 * [ ] Add special shape of a simple maze to go through
 
 * [x] FIX: bug where dashing collides with longs gone obstacles
@@ -14,14 +20,15 @@
 
 * [x] Add restart button after game over
 * [x] Random shapes spawning
-* [x] Test scenarios (`cargo run -- -s <name>`, see `src/scenario.rs`)
 
 ## Features
 
 * [ ] Levels?
   - Infinite mode?
-  - Have an editor?
 
+* [ ] Have an editor?
+  - Own `.todge` files for levels? 😮
+  - Ability to control movement of obstacles in time 😮
 
 ## Mechanics
 

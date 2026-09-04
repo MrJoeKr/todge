@@ -3,6 +3,7 @@ mod config;
 mod dash;
 mod obstacle;
 mod player;
+mod ultimate;
 
 use app::App;
 use std::fs::File;

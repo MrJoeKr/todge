@@ -21,8 +21,14 @@ pub const DASH_ICONS: [char; 4] = ['█', '▓', '▒', '░'];
 
 pub const DASH_EFFECT_CHANGE: Duration = Duration::from_millis(100);
 
+pub const ULT_DURATION: Duration = Duration::from_millis(5000);
+pub const BARRIER_ICON: char = '=';
+/// Rows at or below this are swept when the ultimate fires.
+pub const ULT_DESTROY_FROM_ROW: usize = HEIGHT - HEIGHT / 3;
+pub const ULT_BAR_WIDTH: usize = 20;
+
 // Obstacle spawning
-pub const SPAWN_AFTER_MS: Duration = Duration::from_millis(500);
+pub const SPAWN_AFTER_MS: Duration = Duration::from_millis(200);
 pub const INIT_SPEED: f64 = 5.0;
 pub const INCREASE_SPEED_BY: f64 = 1.0;
 pub const INIT_SPEEDUP_AFTER: Duration = Duration::from_millis(1000);

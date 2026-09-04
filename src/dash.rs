@@ -25,6 +25,13 @@ impl DashEffectCollection {
         });
     }
 
+    /// Same fade for all cells, starting from the newest dash effect icon
+    pub fn add_burst(&mut self, cells: impl IntoIterator<Item = (usize, usize)>) {
+        for cell in cells {
+            self.container.insert(cell, DashEffect::default());
+        }
+    }
+
     pub fn add(&mut self, cells: Vec<(usize, usize)>) {
         assert_eq!(cells.len(), DASH_LENGTH + 1);
 

@@ -2,6 +2,7 @@ use crate::config::*;
 use crate::dash::DashEffectCollection;
 use crate::obstacle::Obstacle;
 use crate::player::{HDirection, Player, PlayerState, VDirection};
+use crate::ultimate::Ultimate;
 
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use rand::{
@@ -31,6 +32,7 @@ pub struct App {
     wants_restart: bool,
 
     player: Player,
+    ultimate: Ultimate,
 
     // Obstacles
     obstacles: HashMap<u64, Obstacle>, // { id: Obs }
@@ -61,6 +63,7 @@ impl App {
                 y: HEIGHT - 1,
                 ..Default::default()
             },
+            ultimate: Ultimate::default(),
 
             obstacles: HashMap::new(),
             obs_id: 0,
@@ -169,6 +172,38 @@ impl App {
         });
     }
 
+    /// Vaporize every obstacle caught by `doomed`, leaving a fade effect.
+    fn destroy_obstacles(&mut self, doomed: impl Fn(&Obstacle) -> bool) {
+        let mut vaporize_cells = Vec::new();
+
+        self.obstacles.retain(|_, obs| {
+            if !doomed(obs) {
+                return true;
+            }
+
+            vaporize_cells.extend(
+                obs.cells()
+                    .filter_map(|(x, y)| Some((usize::try_from(x).ok()?, usize::try_from(y).ok()?)))
+                    .filter(|&(x, y)| x < WIDTH && y < HEIGHT),
+            );
+            false
+        });
+
+        self.dash_collection.add_burst(vaporize_cells);
+    }
+
+    /// Vaporize obstacles in the lower part of the board once when the ultimate fires.
+    fn destroy_lower_obstacles(&mut self) {
+        self.destroy_obstacles(|obs| obs.cells().any(|(_, y)| y >= ULT_DESTROY_FROM_ROW as i32));
+    }
+
+    /// Per tick while the ultimate runs: anything that would have hit the player.
+    fn destroy_touching_obstacles(&mut self) {
+        let (px, py) = self.player.position();
+        // TODO(fix): dashing not considered
+        self.destroy_obstacles(|obs| obs.cells().any(|cell| cell == (px as i32, py as i32)));
+    }
+
     fn move_player(&mut self) {
         match self.player.move_state {
             PlayerState::Moving(ref h_dir) => match h_dir {
@@ -191,20 +226,19 @@ impl App {
         match self.player.move_state {
             PlayerState::Moving(_) | PlayerState::Flying(_) | PlayerState::Idle => {
                 self.check_collision_helper(&[(self.player.x, self.player.y)])
-            },
-            PlayerState::Dashing(ref p_dir) => {
+            }
+            PlayerState::Dashing(p_dir) => {
                 // `move_player()` already moved the player to the dash destination.
                 // Use the opposite direction to check collision.
-                // Ty `DeepSeek V4 Flash 0731` for finding this bug.
                 let direction = p_dir.opposite();
-                let dash_cells = self.construct_dash_cells(&direction);
+                let dash_cells = self.construct_dash_cells(direction);
                 self.check_collision_helper(&dash_cells)
-            },
+            }
         }
     }
 
     /// Return positions in chronological order of dashing
-    fn construct_dash_cells(&self, p_dir: &HDirection) -> Vec<(usize, usize)> {
+    fn construct_dash_cells(&self, p_dir: HDirection) -> Vec<(usize, usize)> {
         let mut out = vec![(self.player.x, self.player.y)];
         let mut px = self.player.x;
         let py = self.player.y;
@@ -255,9 +289,15 @@ impl App {
     }
 
     fn update_game(&mut self, dt: Duration) {
+        self.ultimate.update(dt, self.player.altitude());
         self.update_obstacles(dt);
         self.move_player();
-        self.game_over = self.check_collision();
+
+        if self.ultimate.is_active() {
+            self.destroy_touching_obstacles();
+        } else {
+            self.game_over = self.check_collision();
+        }
 
         self.try_spawn_obstacle(dt);
 
@@ -286,13 +326,33 @@ impl App {
                     self.wants_restart = true;
                 }
             }
-            KeyCode::Char(keybinds::LEFT) => self.player.move_state = PlayerState::Moving(HDirection::Left),
-            KeyCode::Char(keybinds::RIGHT) => self.player.move_state = PlayerState::Moving(HDirection::Right),
-            KeyCode::Char(keybinds::DASH_LEFT) => self.player.move_state = PlayerState::Dashing(HDirection::Left),
-            KeyCode::Char(keybinds::DASH_RIGHT) => self.player.move_state = PlayerState::Dashing(HDirection::Right),
-            KeyCode::Char(keybinds::UP) => self.player.move_state = PlayerState::Flying(VDirection::Up),
-            KeyCode::Char(keybinds::DOWN) => self.player.move_state = PlayerState::Flying(VDirection::Down),
+            KeyCode::Char(keybinds::LEFT) => {
+                self.player.move_state = PlayerState::Moving(HDirection::Left)
+            }
+            KeyCode::Char(keybinds::RIGHT) => {
+                self.player.move_state = PlayerState::Moving(HDirection::Right)
+            }
+            KeyCode::Char(keybinds::DASH_LEFT) => {
+                self.player.move_state = PlayerState::Dashing(HDirection::Left)
+            }
+            KeyCode::Char(keybinds::DASH_RIGHT) => {
+                self.player.move_state = PlayerState::Dashing(HDirection::Right)
+            }
+            KeyCode::Char(keybinds::UP) => {
+                self.player.move_state = PlayerState::Flying(VDirection::Up)
+            }
+            KeyCode::Char(keybinds::DOWN) => {
+                self.player.move_state = PlayerState::Flying(VDirection::Down)
+            }
+            KeyCode::Char(keybinds::ULTIMATE) => self.try_use_ultimate(),
             _ => (),
+        }
+    }
+
+    fn try_use_ultimate(&mut self) {
+        if self.ultimate.activate() {
+            self.player.y = HEIGHT - 1; // slam to the ground
+            self.destroy_lower_obstacles();
         }
     }
 
@@ -309,6 +369,10 @@ impl App {
     }
 
     fn go_up(&mut self) {
+        if self.ultimate.is_active() {
+            return; // the barrier keeps the player grounded
+        }
+
         self.player.y = self.player.y.saturating_sub(1);
     }
 
@@ -319,7 +383,7 @@ impl App {
     fn dash_left(&mut self) {
         self.player.x = (self.player.x + WIDTH - DASH_LENGTH) % WIDTH;
 
-        let cells = self.construct_dash_cells(&HDirection::Right);
+        let cells = self.construct_dash_cells(HDirection::Right);
         // tracing::debug!(c = ?cells, "Dash Left");
         self.dash_collection.add(cells.to_vec());
     }
@@ -327,19 +391,13 @@ impl App {
     fn dash_right(&mut self) {
         self.player.x = (self.player.x + DASH_LENGTH) % WIDTH;
 
-        let cells = self.construct_dash_cells(&HDirection::Left);
+        let cells = self.construct_dash_cells(HDirection::Left);
         // tracing::debug!(c = ?cells, "Dash Right");
         self.dash_collection.add(cells.to_vec());
     }
 
-    fn clear_board(&mut self) {
-        for row in &mut self.game_grid {
-            row.fill(BG_ICON);
-        }
-    }
-
     fn update_grid(&mut self) {
-        self.clear_board();
+        self.game_grid.iter_mut().for_each(|row| row.fill(BG_ICON));
 
         self.game_grid[self.player.y][self.player.x] = PLAYER_ICON;
 
@@ -347,6 +405,12 @@ impl App {
 
         for obs in self.obstacles.values() {
             obs.render(&mut self.game_grid);
+        }
+
+        if self.ultimate.barrier_visible() {
+            assert!(self.player.y == HEIGHT - 1);
+            const { assert!(HEIGHT > 1); }
+            self.game_grid[self.player.y - 1].fill(BARRIER_ICON);
         }
     }
 }
@@ -363,12 +427,22 @@ impl Widget for &App {
         let instructions = Line::from(vec![
             " Left ".into(),
             // "<h/H>".blue().bold(),
-            format!("<{}/{}>", keybinds::LEFT, keybinds::DASH_LEFT).blue().bold(),
+            format!("<{}/{}>", keybinds::LEFT, keybinds::DASH_LEFT)
+                .blue()
+                .bold(),
             " Right ".into(),
             // "<l/L>".blue().bold(),
-            format!("<{}/{}>", keybinds::RIGHT, keybinds::DASH_RIGHT).blue().bold(),
+            format!("<{}/{}>", keybinds::RIGHT, keybinds::DASH_RIGHT)
+                .blue()
+                .bold(),
             " Up/Down ".into(),
-            format!("<{}/{}>", keybinds::UP, keybinds::DOWN).blue().bold(),
+            format!("<{}/{}>", keybinds::UP, keybinds::DOWN)
+                .blue()
+                .bold(),
+            " Ult ".into(),
+            format!("<{}>", keybinds::label(keybinds::ULTIMATE))
+                .blue()
+                .bold(),
             " Quit ".into(),
             // "<q> ".blue().bold(),
             format!("<{}>", keybinds::QUIT).blue().bold(),
@@ -389,6 +463,7 @@ impl Widget for &App {
                             OBS_ICON => Span::from(c.to_string()).red(),
                             PLAYER_ICON => Span::from(c.to_string()).green(),
                             BG_ICON => Span::from(c.to_string()).blue(),
+                            BARRIER_ICON => Span::from(c.to_string()).yellow(),
                             _ => Span::from(c.to_string()),
                         })
                         .collect::<Vec<_>>(),
@@ -405,6 +480,26 @@ impl Widget for &App {
             Line::from("Restart? <r>".blue()),
         ];
 
+        let filled = (self.ultimate.progress() * ULT_BAR_WIDTH as f64).round() as usize;
+        let bar = format!(
+            "[{}{}]",
+            "█".repeat(filled),
+            "░".repeat(ULT_BAR_WIDTH - filled)
+        );
+        let ult_line = Line::from(match self.ultimate {
+            Ultimate::Charging(_) => vec!["  Ult: ".into(), bar.yellow()],
+            Ultimate::Ready => vec![
+                "  Ult: ".into(),
+                bar.green().bold(),
+                " READY".green().bold(),
+            ],
+            Ultimate::Active(left) => vec![
+                "  Ult: ".into(),
+                bar.cyan(),
+                format!(" {:.1}s", left.as_secs_f64()).cyan().bold(),
+            ],
+        });
+
         let game_on_text = vec![
             Line::from(""),
             Line::from(vec![
@@ -415,6 +510,7 @@ impl Widget for &App {
                 "Speed: ".into(),
                 format!("{:>5} cells/s", self.obs_speed).blue(),
             ]),
+            ult_line,
         ];
         lines.extend(if !self.game_over {
             game_on_text

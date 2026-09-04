@@ -12,6 +12,8 @@ Dodge `■`s to survive.
 
 `■`s speed up as the game progresses.
 
+The higher altitude you have, the faster the ultimate ability recharges.
+
 Survive as long as you can.
 
 ## Setup
@@ -22,7 +24,11 @@ cargo run
 ```
 
 ## Controls
-* `<h/l>` Left/Right
-* `<H/L>` Dash Left/Dash Right
+Default controls. Can be changed in `src/config/keybinds.rs`:
+* `<i/k>` Up/Down
+* `<j/l>` Left/Right
+* `<J/L>` Dash Left/Dash Right (shift + the key)
+* `<SPACE>` Ultimate ability (invincibility for a short period of time)
 * `<q>` Quit the Game
-* `<r>` Reset
+* `<r>` Restart the Game
+

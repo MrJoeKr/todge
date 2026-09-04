@@ -1,10 +1,12 @@
-#[derive(Debug)]
+use crate::config::HEIGHT;
+
+#[derive(Debug, Copy, Clone)]
 pub enum HDirection {
     Left,
     Right,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub enum VDirection {
     Up,
     Down,
@@ -38,5 +40,9 @@ pub struct Player {
 impl Player {
     pub fn position(&self) -> (usize, usize) {
         (self.x, self.y)
+    }
+
+    pub fn altitude(&self) -> usize {
+        HEIGHT - 1 - self.y
     }
 }
