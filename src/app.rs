@@ -199,9 +199,24 @@ impl App {
 
     /// Per tick while the ultimate runs: anything that would have hit the player.
     fn destroy_touching_obstacles(&mut self) {
-        let (px, py) = self.player.position();
-        // TODO(fix): dashing not considered
-        self.destroy_obstacles(|obs| obs.cells().any(|cell| cell == (px as i32, py as i32)));
+        let dash_cells: Vec<(i32, i32)> = self
+            .dash_collection
+            .container
+            .iter()
+            .filter_map(|(&(x, y), _)| {
+                if y == HEIGHT - 1 {
+                    Some((x as i32, y as i32))
+                } else {
+                    None
+                }
+            }) // also add player position
+            .chain(std::iter::once({
+                let (px, py) = self.player.position();
+                (px as i32, py as i32)
+            }))
+            .collect();
+
+        self.destroy_obstacles(|obs| obs.cells().any(|cell| dash_cells.contains(&cell)));
     }
 
     fn move_player(&mut self) {
@@ -409,7 +424,9 @@ impl App {
 
         if self.ultimate.barrier_visible() {
             assert!(self.player.y == HEIGHT - 1);
-            const { assert!(HEIGHT > 1); }
+            const {
+                assert!(HEIGHT > 1);
+            }
             self.game_grid[self.player.y - 1].fill(BARRIER_ICON);
         }
     }
